@@ -46,3 +46,12 @@ func EnableHandlingTimeHistogram(opts ...HistogramOption) {
 	DefaultServerMetrics.EnableHandlingTimeHistogram(opts...)
 	prom.Register(DefaultServerMetrics.serverHandledHistogram)
 }
+
+// EnableHandlingTimeSummary turns on recording of handling time
+// of RPCs. Summary metrics can be very expensive for Prometheus
+// to retain and query. This function acts on the DefaultServerMetrics
+// variable and the default Prometheus metrics registry.
+func EnableHandlingTimeSummary(objectives map[float64]float64, opts ...SummaryOption) {
+	DefaultServerMetrics.EnableHandlingTimeSummary(objectives, opts...)
+	prom.MustRegister(DefaultServerMetrics.serverHandledSummary)
+}

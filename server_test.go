@@ -58,6 +58,7 @@ func (s *ServerInterceptorTestSuite) SetupSuite() {
 	var err error
 
 	EnableHandlingTimeHistogram()
+	EnableHandlingTimeSummary(map[float64]float64{0: 0.01, 0.5: 0.01, 1: 0.01})
 
 	s.serverListener, err = net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(s.T(), err, "must be able to allocate a port for serverListener")
@@ -86,6 +87,7 @@ func (s *ServerInterceptorTestSuite) SetupTest() {
 	DefaultServerMetrics.serverStartedCounter.Reset()
 	DefaultServerMetrics.serverHandledCounter.Reset()
 	DefaultServerMetrics.serverHandledHistogram.Reset()
+	DefaultServerMetrics.serverHandledSummary.Reset()
 	DefaultServerMetrics.serverStreamMsgReceived.Reset()
 	DefaultServerMetrics.serverStreamMsgSent.Reset()
 	Register(s.server)
@@ -131,12 +133,14 @@ func (s *ServerInterceptorTestSuite) TestUnaryIncrementsMetrics() {
 	requireValue(s.T(), 1, DefaultServerMetrics.serverStartedCounter.WithLabelValues("unary", "mwitkow.testproto.TestService", "PingEmpty"))
 	requireValue(s.T(), 1, DefaultServerMetrics.serverHandledCounter.WithLabelValues("unary", "mwitkow.testproto.TestService", "PingEmpty", "OK"))
 	requireValueHistCount(s.T(), 1, DefaultServerMetrics.serverHandledHistogram.WithLabelValues("unary", "mwitkow.testproto.TestService", "PingEmpty"))
+	requireValueSummaryCount(s.T(), 1, DefaultServerMetrics.serverHandledSummary.WithLabelValues("unary", "mwitkow.testproto.TestService", "PingEmpty"))
 
 	_, err = s.testClient.PingError(s.ctx, &pb_testproto.PingRequest{ErrorCodeReturned: uint32(codes.FailedPrecondition)}) // should return with code=FailedPrecondition
 	require.Error(s.T(), err)
 	requireValue(s.T(), 1, DefaultServerMetrics.serverStartedCounter.WithLabelValues("unary", "mwitkow.testproto.TestService", "PingError"))
 	requireValue(s.T(), 1, DefaultServerMetrics.serverHandledCounter.WithLabelValues("unary", "mwitkow.testproto.TestService", "PingError", "FailedPrecondition"))
 	requireValueHistCount(s.T(), 1, DefaultServerMetrics.serverHandledHistogram.WithLabelValues("unary", "mwitkow.testproto.TestService", "PingError"))
+	requireValueSummaryCount(s.T(), 1, DefaultServerMetrics.serverHandledSummary.WithLabelValues("unary", "mwitkow.testproto.TestService", "PingError"))
 }
 
 func (s *ServerInterceptorTestSuite) TestStartedStreamingIncrementsStarted() {
@@ -175,6 +179,8 @@ func (s *ServerInterceptorTestSuite) TestStreamingIncrementsMetrics() {
 		DefaultServerMetrics.serverStreamMsgReceived.WithLabelValues("server_stream", "mwitkow.testproto.TestService", "PingList"))
 	requireValueWithRetryHistCount(s.ctx, s.T(), 1,
 		DefaultServerMetrics.serverHandledHistogram.WithLabelValues("server_stream", "mwitkow.testproto.TestService", "PingList"))
+	requireValueWithRetrySummaryCount(s.ctx, s.T(), 1,
+		DefaultServerMetrics.serverHandledSummary.WithLabelValues("server_stream", "mwitkow.testproto.TestService", "PingList"))
 
 	_, err := s.testClient.PingList(s.ctx, &pb_testproto.PingRequest{ErrorCodeReturned: uint32(codes.FailedPrecondition)}) // should return with code=FailedPrecondition
 	require.NoError(s.T(), err, "PingList must not fail immediately")
@@ -185,6 +191,8 @@ func (s *ServerInterceptorTestSuite) TestStreamingIncrementsMetrics() {
 		DefaultServerMetrics.serverHandledCounter.WithLabelValues("server_stream", "mwitkow.testproto.TestService", "PingList", "FailedPrecondition"))
 	requireValueWithRetryHistCount(s.ctx, s.T(), 2,
 		DefaultServerMetrics.serverHandledHistogram.WithLabelValues("server_stream", "mwitkow.testproto.TestService", "PingList"))
+	requireValueWithRetrySummaryCount(s.ctx, s.T(), 2,
+		DefaultServerMetrics.serverHandledSummary.WithLabelValues("server_stream", "mwitkow.testproto.TestService", "PingList"))
 }
 
 // fetchPrometheusLines does mocked HTTP GET request against real prometheus handler to get the same view that Prometheus
@@ -290,6 +298,43 @@ func toFloat64HistCount(h prometheus.Observer) uint64 {
 	panic(fmt.Errorf("collected a non-histogram metric: %s", pb))
 }
 
+// toFloat64SummaryCount does the same thing as prometheus go client testutil.ToFloat64, but for summaries.
+func toFloat64SummaryCount(h prometheus.Observer) uint64 {
+	var (
+		m      prometheus.Metric
+		mCount int
+		mChan  = make(chan prometheus.Metric)
+		done   = make(chan struct{})
+	)
+
+	go func() {
+		for m = range mChan {
+			mCount++
+		}
+		close(done)
+	}()
+
+	c, ok := h.(prometheus.Collector)
+	if !ok {
+		panic(fmt.Errorf("observer is not a collector; got: %T", h))
+	}
+
+	c.Collect(mChan)
+	close(mChan)
+	<-done
+
+	if mCount != 1 {
+		panic(fmt.Errorf("collected %d metrics instead of exactly 1", mCount))
+	}
+
+	pb := &dto.Metric{}
+	m.Write(pb)
+	if pb.Summary != nil {
+		return pb.Summary.GetSampleCount()
+	}
+	panic(fmt.Errorf("collected a non-summary metric: %s", pb))
+}
+
 func requireValue(t *testing.T, expect int, c prometheus.Collector) {
 	v := int(testutil.ToFloat64(c))
 	if v == expect {
@@ -303,6 +348,17 @@ func requireValue(t *testing.T, expect int, c prometheus.Collector) {
 
 func requireValueHistCount(t *testing.T, expect int, o prometheus.Observer) {
 	v := int(toFloat64HistCount(o))
+	if v == expect {
+		return
+	}
+
+	metricFullName := reflect.ValueOf(*o.(prometheus.Metric).Desc()).FieldByName("fqName").String()
+	t.Errorf("expected %d %s value; got %d; ", expect, metricFullName, v)
+	t.Fail()
+}
+
+func requireValueSummaryCount(t *testing.T, expect int, o prometheus.Observer) {
+	v := int(toFloat64SummaryCount(o))
 	if v == expect {
 		return
 	}
@@ -341,6 +397,24 @@ func requireValueWithRetryHistCount(ctx context.Context, t *testing.T, expect in
 		case <-ctx.Done():
 			metricFullName := reflect.ValueOf(*o.(prometheus.Metric).Desc()).FieldByName("fqName").String()
 			t.Errorf("timeout while expecting %d %s histogram count value; got %d; ", expect, metricFullName, v)
+			t.Fail()
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func requireValueWithRetrySummaryCount(ctx context.Context, t *testing.T, expect int, o prometheus.Observer) {
+	for {
+		v := int(toFloat64SummaryCount(o))
+		if v == expect {
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			metricFullName := reflect.ValueOf(*o.(prometheus.Metric).Desc()).FieldByName("fqName").String()
+			t.Errorf("timeout while expecting %d %s summary count value; got %d; ", expect, metricFullName, v)
 			t.Fail()
 			return
 		case <-time.After(100 * time.Millisecond):

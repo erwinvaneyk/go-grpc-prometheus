@@ -17,6 +17,9 @@ type ServerMetrics struct {
 	serverHandledHistogramEnabled bool
 	serverHandledHistogramOpts    prom.HistogramOpts
 	serverHandledHistogram        *prom.HistogramVec
+	serverHandledSummaryEnabled   bool
+	serverHandledSummaryOpts      prom.SummaryOpts
+	serverHandledSummary          *prom.SummaryVec
 }
 
 // NewServerMetrics returns a ServerMetrics object. Use a new instance of
@@ -52,7 +55,14 @@ func NewServerMetrics(counterOpts ...CounterOption) *ServerMetrics {
 			Help:    "Histogram of response latency (seconds) of gRPC that had been application-level handled by the server.",
 			Buckets: prom.DefBuckets,
 		},
-		serverHandledHistogram: nil,
+		serverHandledHistogram:      nil,
+		serverHandledSummaryEnabled: false,
+		serverHandledSummaryOpts: prom.SummaryOpts{
+			Name: "grpc_server_handling_seconds_summary",
+			Help: "Summary of response latency (seconds) of gRPC that had been application-level handled by the server.",
+			// Note: Default objectives are no longer supported since Prometheus 0.10.
+		},
+		serverHandledSummary: nil,
 	}
 }
 
@@ -73,6 +83,23 @@ func (m *ServerMetrics) EnableHandlingTimeHistogram(opts ...HistogramOption) {
 	m.serverHandledHistogramEnabled = true
 }
 
+// EnableHandlingTimeSummary enables summaries being registered when
+// registering the ServerMetrics on a Prometheus registry. Summaries can be
+// expensive on Prometheus servers.
+func (m *ServerMetrics) EnableHandlingTimeSummary(objectives map[float64]float64, opts ...SummaryOption) {
+	m.serverHandledSummaryOpts.Objectives = objectives
+	for _, o := range opts {
+		o(&m.serverHandledSummaryOpts)
+	}
+	if !m.serverHandledSummaryEnabled {
+		m.serverHandledSummary = prom.NewSummaryVec(
+			m.serverHandledSummaryOpts,
+			[]string{"grpc_type", "grpc_service", "grpc_method"},
+		)
+	}
+	m.serverHandledSummaryEnabled = true
+}
+
 // Describe sends the super-set of all possible descriptors of metrics
 // collected by this Collector to the provided channel and returns once
 // the last descriptor has been sent.
@@ -83,6 +110,9 @@ func (m *ServerMetrics) Describe(ch chan<- *prom.Desc) {
 	m.serverStreamMsgSent.Describe(ch)
 	if m.serverHandledHistogramEnabled {
 		m.serverHandledHistogram.Describe(ch)
+	}
+	if m.serverHandledSummaryEnabled {
+		m.serverHandledSummary.Describe(ch)
 	}
 }
 
@@ -96,6 +126,9 @@ func (m *ServerMetrics) Collect(ch chan<- prom.Metric) {
 	m.serverStreamMsgSent.Collect(ch)
 	if m.serverHandledHistogramEnabled {
 		m.serverHandledHistogram.Collect(ch)
+	}
+	if m.serverHandledSummaryEnabled {
+		m.serverHandledSummary.Collect(ch)
 	}
 }
 
@@ -178,6 +211,9 @@ func preRegisterMethod(metrics *ServerMetrics, serviceName string, mInfo *grpc.M
 	metrics.serverStreamMsgSent.GetMetricWithLabelValues(methodType, serviceName, methodName)
 	if metrics.serverHandledHistogramEnabled {
 		metrics.serverHandledHistogram.GetMetricWithLabelValues(methodType, serviceName, methodName)
+	}
+	if metrics.serverHandledSummaryEnabled {
+		metrics.serverHandledSummary.GetMetricWithLabelValues(methodType, serviceName, methodName)
 	}
 	for _, code := range allCodes {
 		metrics.serverHandledCounter.GetMetricWithLabelValues(methodType, serviceName, methodName, code.String())

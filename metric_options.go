@@ -39,3 +39,13 @@ func WithHistogramConstLabels(labels prom.Labels) HistogramOption {
 		o.ConstLabels = labels
 	}
 }
+
+type SummaryOption func(summary *prom.SummaryOpts)
+
+// WithSummaryConstLabels allows you to add custom ConstLabels to
+// summary metrics.
+func WithSummaryConstLabels(labels prom.Labels) SummaryOption {
+	return func(o *prom.SummaryOpts) {
+		o.ConstLabels = labels
+	}
+}
