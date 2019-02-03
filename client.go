@@ -35,7 +35,7 @@ func init() {
 // default Prometheus metrics registry.
 func EnableClientHandlingTimeHistogram(opts ...HistogramOption) {
 	DefaultClientMetrics.EnableClientHandlingTimeHistogram(opts...)
-	prom.Register(DefaultClientMetrics.clientHandledHistogram)
+	prom.MustRegister(DefaultClientMetrics.clientHandledHistogram)
 }
 
 // EnableClientHandlingTimeHistogram turns on recording of handling time of

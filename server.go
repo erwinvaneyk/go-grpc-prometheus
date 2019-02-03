@@ -44,7 +44,7 @@ func Register(server *grpc.Server) {
 // variable and the default Prometheus metrics registry.
 func EnableHandlingTimeHistogram(opts ...HistogramOption) {
 	DefaultServerMetrics.EnableHandlingTimeHistogram(opts...)
-	prom.Register(DefaultServerMetrics.serverHandledHistogram)
+	prom.MustRegister(DefaultServerMetrics.serverHandledHistogram)
 }
 
 // EnableHandlingTimeSummary turns on recording of handling time
