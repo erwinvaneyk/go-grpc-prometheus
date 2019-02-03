@@ -20,6 +20,9 @@ type ClientMetrics struct {
 	clientHandledHistogramEnabled bool
 	clientHandledHistogramOpts    prom.HistogramOpts
 	clientHandledHistogram        *prom.HistogramVec
+	clientHandledSummaryEnabled   bool
+	clientHandledSummaryOpts      prom.SummaryOpts
+	clientHandledSummary          *prom.SummaryVec
 }
 
 // NewClientMetrics returns a ClientMetrics object. Use a new instance of
@@ -59,7 +62,14 @@ func NewClientMetrics(counterOpts ...CounterOption) *ClientMetrics {
 			Help:    "Histogram of response latency (seconds) of the gRPC until it is finished by the application.",
 			Buckets: prom.DefBuckets,
 		},
-		clientHandledHistogram: nil,
+		clientHandledHistogram:      nil,
+		clientHandledSummaryEnabled: false,
+		clientHandledSummaryOpts: prom.SummaryOpts{
+			Name: "grpc_client_handling_seconds_summary",
+			Help: "Summary of response latency (seconds) of the gRPC until it is finished by the application.",
+			// Note: Default objectives are no longer supported since Prometheus 0.10.
+		},
+		clientHandledSummary: nil,
 	}
 }
 
@@ -74,6 +84,9 @@ func (m *ClientMetrics) Describe(ch chan<- *prom.Desc) {
 	if m.clientHandledHistogramEnabled {
 		m.clientHandledHistogram.Describe(ch)
 	}
+	if m.clientHandledSummaryEnabled {
+		m.clientHandledSummary.Describe(ch)
+	}
 }
 
 // Collect is called by the Prometheus registry when collecting
@@ -84,8 +97,8 @@ func (m *ClientMetrics) Collect(ch chan<- prom.Metric) {
 	m.clientHandledCounter.Collect(ch)
 	m.clientStreamMsgReceived.Collect(ch)
 	m.clientStreamMsgSent.Collect(ch)
-	if m.clientHandledHistogramEnabled {
-		m.clientHandledHistogram.Collect(ch)
+	if m.clientHandledSummaryEnabled {
+		m.clientHandledSummary.Collect(ch)
 	}
 }
 
@@ -102,6 +115,22 @@ func (m *ClientMetrics) EnableClientHandlingTimeHistogram(opts ...HistogramOptio
 		)
 	}
 	m.clientHandledHistogramEnabled = true
+}
+
+// EnableClientHandlingTimeSummary turns on recording of handling time of RPCs.
+// Summary metrics can be very expensive for Prometheus to retain and query.
+func (m *ClientMetrics) EnableClientHandlingTimeSummary(objectives map[float64]float64, opts ...SummaryOption) {
+	m.clientHandledSummaryOpts.Objectives = objectives
+	for _, o := range opts {
+		o(&m.clientHandledSummaryOpts)
+	}
+	if !m.clientHandledSummaryEnabled {
+		m.clientHandledSummary = prom.NewSummaryVec(
+			m.clientHandledSummaryOpts,
+			[]string{"grpc_type", "grpc_service", "grpc_method"},
+		)
+	}
+	m.clientHandledSummaryEnabled = true
 }
 
 // UnaryClientInterceptor is a gRPC client-side interceptor that provides Prometheus monitoring for Unary RPCs.

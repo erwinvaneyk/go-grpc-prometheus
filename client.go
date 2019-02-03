@@ -37,3 +37,12 @@ func EnableClientHandlingTimeHistogram(opts ...HistogramOption) {
 	DefaultClientMetrics.EnableClientHandlingTimeHistogram(opts...)
 	prom.Register(DefaultClientMetrics.clientHandledHistogram)
 }
+
+// EnableClientHandlingTimeHistogram turns on recording of handling time of
+// RPCs. Histogram metrics can be very expensive for Prometheus to retain and
+// query. This function acts on the DefaultClientMetrics variable and the
+// default Prometheus metrics registry.
+func EnableClientHandlingTimeSummary(objectives map[float64]float64, opts ...SummaryOption) {
+	DefaultClientMetrics.EnableClientHandlingTimeSummary(objectives, opts...)
+	prom.MustRegister(DefaultClientMetrics.clientHandledSummary)
+}

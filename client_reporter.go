@@ -43,4 +43,7 @@ func (r *clientReporter) Handled(code codes.Code) {
 	if r.metrics.clientHandledHistogramEnabled {
 		r.metrics.clientHandledHistogram.WithLabelValues(string(r.rpcType), r.serviceName, r.methodName).Observe(time.Since(r.startTime).Seconds())
 	}
+	if r.metrics.clientHandledSummaryEnabled {
+		r.metrics.clientHandledSummary.WithLabelValues(string(r.rpcType), r.serviceName, r.methodName).Observe(time.Since(r.startTime).Seconds())
+	}
 }

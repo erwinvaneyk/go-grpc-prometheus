@@ -44,6 +44,7 @@ func (s *ClientInterceptorTestSuite) SetupSuite() {
 	var err error
 
 	EnableClientHandlingTimeHistogram()
+	EnableClientHandlingTimeSummary(map[float64]float64{0: 0.01, 0.5: 0.01, 1: 0.01})
 
 	s.serverListener, err = net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(s.T(), err, "must be able to allocate a port for serverListener")
@@ -75,6 +76,7 @@ func (s *ClientInterceptorTestSuite) SetupTest() {
 	DefaultClientMetrics.clientStartedCounter.Reset()
 	DefaultClientMetrics.clientHandledCounter.Reset()
 	DefaultClientMetrics.clientHandledHistogram.Reset()
+	DefaultClientMetrics.clientHandledSummary.Reset()
 	DefaultClientMetrics.clientStreamMsgReceived.Reset()
 	DefaultClientMetrics.clientStreamMsgSent.Reset()
 }
@@ -97,12 +99,14 @@ func (s *ClientInterceptorTestSuite) TestUnaryIncrementsMetrics() {
 	requireValue(s.T(), 1, DefaultClientMetrics.clientStartedCounter.WithLabelValues("unary", "mwitkow.testproto.TestService", "PingEmpty"))
 	requireValue(s.T(), 1, DefaultClientMetrics.clientHandledCounter.WithLabelValues("unary", "mwitkow.testproto.TestService", "PingEmpty", "OK"))
 	requireValueHistCount(s.T(), 1, DefaultClientMetrics.clientHandledHistogram.WithLabelValues("unary", "mwitkow.testproto.TestService", "PingEmpty"))
+	requireValueSummaryCount(s.T(), 1, DefaultClientMetrics.clientHandledSummary.WithLabelValues("unary", "mwitkow.testproto.TestService", "PingEmpty"))
 
 	_, err = s.testClient.PingError(s.ctx, &pb_testproto.PingRequest{ErrorCodeReturned: uint32(codes.FailedPrecondition)}) // should return with code=FailedPrecondition
 	require.Error(s.T(), err)
 	requireValue(s.T(), 1, DefaultClientMetrics.clientStartedCounter.WithLabelValues("unary", "mwitkow.testproto.TestService", "PingError"))
 	requireValue(s.T(), 1, DefaultClientMetrics.clientHandledCounter.WithLabelValues("unary", "mwitkow.testproto.TestService", "PingError", "FailedPrecondition"))
 	requireValueHistCount(s.T(), 1, DefaultClientMetrics.clientHandledHistogram.WithLabelValues("unary", "mwitkow.testproto.TestService", "PingError"))
+	requireValueSummaryCount(s.T(), 1, DefaultClientMetrics.clientHandledSummary.WithLabelValues("unary", "mwitkow.testproto.TestService", "PingError"))
 }
 
 func (s *ClientInterceptorTestSuite) TestStartedStreamingIncrementsStarted() {
@@ -134,6 +138,7 @@ func (s *ClientInterceptorTestSuite) TestStreamingIncrementsMetrics() {
 	requireValue(s.T(), countListResponses, DefaultClientMetrics.clientStreamMsgReceived.WithLabelValues("server_stream", "mwitkow.testproto.TestService", "PingList"))
 	requireValue(s.T(), 1, DefaultClientMetrics.clientStreamMsgSent.WithLabelValues("server_stream", "mwitkow.testproto.TestService", "PingList"))
 	requireValueHistCount(s.T(), 1, DefaultClientMetrics.clientHandledHistogram.WithLabelValues("server_stream", "mwitkow.testproto.TestService", "PingList"))
+	requireValueSummaryCount(s.T(), 1, DefaultClientMetrics.clientHandledSummary.WithLabelValues("server_stream", "mwitkow.testproto.TestService", "PingList"))
 
 	ss, err := s.testClient.PingList(s.ctx, &pb_testproto.PingRequest{ErrorCodeReturned: uint32(codes.FailedPrecondition)}) // should return with code=FailedPrecondition
 	require.NoError(s.T(), err, "PingList must not fail immediately")
@@ -146,4 +151,5 @@ func (s *ClientInterceptorTestSuite) TestStreamingIncrementsMetrics() {
 	requireValue(s.T(), 2, DefaultClientMetrics.clientStartedCounter.WithLabelValues("server_stream", "mwitkow.testproto.TestService", "PingList"))
 	requireValue(s.T(), 1, DefaultClientMetrics.clientHandledCounter.WithLabelValues("server_stream", "mwitkow.testproto.TestService", "PingList", "FailedPrecondition"))
 	requireValueHistCount(s.T(), 2, DefaultClientMetrics.clientHandledHistogram.WithLabelValues("server_stream", "mwitkow.testproto.TestService", "PingList"))
+	requireValueSummaryCount(s.T(), 2, DefaultClientMetrics.clientHandledSummary.WithLabelValues("server_stream", "mwitkow.testproto.TestService", "PingList"))
 }
